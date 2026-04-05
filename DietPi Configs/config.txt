@@ -21,8 +21,8 @@ hdmi_force_hotplug=1
 #hdmi_ignore_hotplug=1
 
 # Uncomment to force a console size. By default it will be display's size minus overscan.
-framebuffer_width=1920
-framebuffer_height=1080
+framebuffer_width=1280
+framebuffer_height=720
 
 # Uncomment to enable SDTV/composite output on RPi4. This has no effect on previous RPi models.
 #enable_tvout=0
@@ -43,7 +43,7 @@ hdmi_blanking=0
 disable_overscan=1
 
 # Kiosk: DRM/KMS для WPE WebKit (аппаратное ускорение)
-dtoverlay=vc4-kms-v3d
+dtoverlay=vc4-kms-v3d,cma-128
 
 # Uncomment the following to adjust overscan.
 # Use positive numbers if console goes off screen, and negative if there is too much border.
@@ -61,10 +61,11 @@ dtoverlay=vc4-kms-v3d
 #disable_camera_led=1
 
 #-------GPU memory splits-------
-# Kiosk: 128MB для GPU (аппаратное декодирование видео в WPE)
-gpu_mem_256=128
-gpu_mem_512=128
-gpu_mem_1024=128
+# Kiosk: GPU память для аппаратного декодирования видео
+# 128MB для RPi с 256/512MB RAM, 256MB для RPi4 с 1GB+
+gpu_mem_256=76
+gpu_mem_512=76
+gpu_mem_1024=76
 
 #-------Boot splash screen------
 disable_splash=1

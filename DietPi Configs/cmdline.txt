@@ -1,1 +1,1 @@
-modules=sd-mod,usb-storage,ext4 rootfstype=ext4 quiet loglevel=0 console=tty3 vt.global_cursor_default=0 logo.nologo fastboot noatime nodiratime
+rootfstype=ext4 rootwait fsck.repair=yes net.ifnames=0 logo.nologo console=tty1 quiet loglevel=0 vt.global_cursor_default=0 consoleblank=0 fastboot noatime nodiratime panic=10

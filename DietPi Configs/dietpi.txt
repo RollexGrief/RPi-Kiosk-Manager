@@ -44,14 +44,14 @@ AUTO_SETUP_NET_STATIC_DNS=9.9.9.9 149.112.112.112
 AUTO_SETUP_DHCP_TO_STATIC=0
 
 # Hostname
-AUTO_SETUP_NET_HOSTNAME=screen1
+AUTO_SETUP_NET_HOSTNAME=dietpi
 
 # Force Ethernet speeds: 0=automatic speed | 10 = 10 Mbit/s | 100 = 100 Mbit/s etc.
 # - Use this when your Ethernet adapter has an unstable 1 Gbit/s link.
 AUTO_SETUP_NET_ETH_FORCE_SPEED=0
 
 # Delay service starts at boot until network is established: 0=disabled | 1=enabled
-AUTO_SETUP_BOOT_WAIT_FOR_NETWORK=1
+AUTO_SETUP_BOOT_WAIT_FOR_NETWORK=0
 
 ##### Misc options #####
 # Swap space size to generate: 0 => disable | 1 => auto | 2 and up => size in MiB
@@ -75,8 +75,7 @@ AUTO_UNMASK_LOGIND=1
 # - Add as many APT package names as you wish, separated by space.
 # - They will be installed after dietpi-software options and before the script defined via AUTO_SETUP_CUSTOM_SCRIPT_EXEC (see below) is executed.
 # - E.g. the following (without the leading "#") will install the APT packages iotop, iptables and xz-utils:
-# Kiosk: пакеты для Cage + Cog (WPE WebKit)
-AUTO_SETUP_APT_INSTALLS=cage cog libwpewebkit-2.0 libwpebackend-fdo-1.0-1
+AUTO_SETUP_APT_INSTALLS=
 
 # Custom Script (pre-networking and pre-DietPi install)
 # - Allows you to automatically execute a custom script before network is up on first boot.
