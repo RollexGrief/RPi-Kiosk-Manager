@@ -53,7 +53,7 @@ GETTY
 
 do_install() {
     echo "=========================================="
-    echo " УСТАНОВКА KIOSK MODE (Cage + Cog)"
+    echo " УСТАНОВКА KIOSK MODE (Cage + Chromium)"
     echo " Пользователь: $RPI_USER"
     echo "=========================================="
 
@@ -72,23 +72,15 @@ do_install() {
 
     update_config "$INPUT_URL" "$INPUT_W" "$INPUT_H"
 
-    echo ">>> Установка Cage, Cog и зависимостей..."
+    echo ">>> Установка Cage, Chromium и зависимостей..."
     apt-get update -qq
     apt-get install --no-install-recommends -y \
         cage \
-        cog \
+        chromium \
         dbus \
         dbus-user-session \
-        sqlite3 \
-        glib-networking \
-        libwpewebkit-2.0-1 \
-        libwpebackend-fdo-1.0-1 \
-        gstreamer1.0-libav \
-        gstreamer1.0-plugins-base \
-        gstreamer1.0-plugins-good \
-        gstreamer1.0-plugins-bad \
-        gstreamer1.0-plugins-ugly \
         socat \
+        curl \
         avahi-daemon
 
     echo ">>> Настройка hostname: ${INPUT_HOSTNAME}.local ..."
@@ -112,7 +104,7 @@ UDEV
     udevadm control --reload-rules
     udevadm trigger
 
-    echo ">>> Создание скрипта запуска..."
+	echo ">>> Создание скрипта запуска..."
     cat <<'SCRIPT' > /usr/local/bin/kiosk-launch.sh
 #!/bin/bash
 if [ -f "$HOME/kiosk.conf" ]; then
@@ -125,37 +117,69 @@ export XDG_CACHE_HOME="$HOME/.cache"
 export XDG_DATA_HOME="$HOME/.local/share"
 export XDG_CONFIG_HOME="$HOME/.config"
 
-# Создаём директории для persistent storage WPE WebKit
 mkdir -p "$XDG_DATA_HOME" "$XDG_CACHE_HOME" "$XDG_CONFIG_HOME"
 
-# Извлекаем host:port из URL для локального проксирования
-REMOTE_HOST=$(echo "$URL" | sed -E 's|^https?://([^/]+).*|\1|')
-LOCAL_PORT=$(echo "$REMOTE_HOST" | grep -oP ':\K[0-9]+' || echo "80")
-URL_PATH=$(echo "$URL" | sed -E 's|^https?://[^/]+(/.*)|\1|')
+# Проверяем протокол: используем socat только для HTTP
+if [[ "$URL" == http://* ]]; then
+    # Извлекаем host, port и путь
+    REMOTE_HOST_PORT=$(echo "$URL" | sed -E 's|^http://([^/]+).*|\1|')
+    REMOTE_HOST=$(echo "$REMOTE_HOST_PORT" | cut -d: -f1)
+    LOCAL_PORT=$(echo "$REMOTE_HOST_PORT" | grep -oP ':\K[0-9]+' || echo "80")
+    URL_PATH=$(echo "$URL" | sed -E 's|^http://[^/]+(/.*)?|\1|')
 
-# Запускаем socat: localhost:LOCAL_PORT -> REMOTE_HOST
-# Service Workers работают на localhost без HTTPS
-socat TCP-LISTEN:${LOCAL_PORT},fork,reuseaddr TCP:${REMOTE_HOST} &
-SOCAT_PID=$!
-sleep 1
+    # Запускаем socat: localhost:LOCAL_PORT -> REMOTE_HOST:LOCAL_PORT
+    socat TCP-LISTEN:${LOCAL_PORT},fork,reuseaddr TCP:${REMOTE_HOST}:${LOCAL_PORT} &
+    SOCAT_PID=$!
+    sleep 1
 
-# Подменяем URL на localhost
-LOCAL_URL="http://localhost:${LOCAL_PORT}${URL_PATH}"
+    LOCAL_URL="http://localhost:${LOCAL_PORT}${URL_PATH}"
+    trap "kill $SOCAT_PID 2>/dev/null" EXIT
+else
+    LOCAL_URL="$URL"
+fi
 
-# Ждём готовность файловой системы после загрузки
 sync
 
-# Убиваем socat при завершении
-trap "kill $SOCAT_PID 2>/dev/null" EXIT
-
-exec dbus-run-session cage -d -m last -- cog \
-    --platform=wl \
-    --cookie-jar=sqlite:"$XDG_DATA_HOME/cog-cookies.db" \
-    --enable-page-cache=true \
-    --enable-offline-web-application-cache=true \
-    --enable-html5-local-storage=true \
-    --enable-html5-database=true \
-    --features="+StorageAPI,+StorageAPIEstimate,+CacheAPI,+ServiceWorkers" \
+exec dbus-run-session cage -d -m last -- chromium \
+    --kiosk \
+    --no-sandbox \
+    --no-first-run \
+    --disable-first-run-ui \
+    --noerrdialogs \
+    --disable-hang-monitor \
+    --disable-dev-shm-usage \
+    --no-default-browser-check \
+    --no-memcheck \
+    --disable-remote-playback-api \
+    --disable-notifications \
+    --disable-default-apps \
+    --disable-background-networking \
+    --disable-component-update \
+    --disable-domain-reliability \
+    --disable-breakpad \
+    --disable-sync \
+    --disable-client-side-phishing-detection \
+    --disable-extensions \
+    --no-pings \
+    --deny-permission-prompts \
+    --disable-background-timer-throttling \
+    --disable-renderer-backgrounding \
+    --disable-prompt-on-repost \
+    --disable-pinch \
+    --hide-scrollbars \
+    --autoplay-policy=no-user-gesture-required \
+    --ozone-platform=wayland \
+    --allow-insecure-localhost \
+    --allow-running-insecure-content \
+    --ignore-certificate-errors \
+    --password-store=basic \
+    --use-gl=egl \
+    --disk-cache-size=52428800 \
+    --enable-features=VaapiVideoDecoder \
+    --disable-features=Translate,TranslateUI,MediaRouter,GlobalMediaControls,MediaRemoting,OptimizationHints,UseChromeOSDirectVideoDecoder \
+    --js-flags="--max-old-space-size=384 --initial-old-space-size=128" \
+    --remote-debugging-port=9222 \
+    --remote-debugging-address=127.0.0.1 \
     "$LOCAL_URL"
 SCRIPT
     chmod +x /usr/local/bin/kiosk-launch.sh
@@ -163,7 +187,7 @@ SCRIPT
     echo ">>> Создание systemd-сервиса..."
     cat <<EOF > /etc/systemd/system/kiosk.service
 [Unit]
-Description=Kiosk Browser (Cage + Cog)
+Description=Kiosk Browser (Cage + Chromium)
 After=systemd-logind.service
 
 [Service]
@@ -177,30 +201,164 @@ TimeoutStopSec=10
 
 ExecStartPre=/bin/bash -c 'mkdir -p /run/user/$USER_ID && chown $RPI_USER:$RPI_USER /run/user/$USER_ID && chmod 700 /run/user/$USER_ID'
 ExecStartPre=-/bin/bash -c 'rm -f /run/user/$USER_ID/wayland-*'
+#ExecStartPre=-/bin/bash -c 'rm -rf $USER_HOME/.cache/chromium/Default/Cache $USER_HOME/.cache/chromium/Default/Code\ Cache $USER_HOME/.cache/chromium/Default/GPUCache'
 
 ExecStart=/usr/local/bin/kiosk-launch.sh
 Environment=XDG_RUNTIME_DIR=/run/user/$USER_ID
 Environment=WLR_LIBINPUT_NO_DEVICES=1
 
-ExecStop=/bin/bash -c 'killall -TERM cog || true'
+ExecStop=/bin/bash -c 'killall -TERM chromium || true'
 ExecStopPost=/bin/sleep 1
 
 Restart=always
 RestartSec=3
 
+MemoryMax=700M
+MemorySwapMax=512M
+OOMScoreAdj=500
+
 [Install]
 WantedBy=multi-user.target
 EOF
 
+    echo ">>> Настройка swap (защита от OOM при тяжёлых видео)..."
+    # DietPi по умолчанию отключает swap. Включаем zram-swap как компромисс
+    # (не изнашивает SD-карту, работает в RAM со сжатием)
+    if command -v dietpi-config &>/dev/null; then
+        # zram-swap через DietPi dietpi.txt или вручную
+        if ! swapon --show | grep -q zram; then
+            apt-get install --no-install-recommends -y zram-tools 2>/dev/null || true
+            if command -v zramswap &>/dev/null; then
+                echo "ALGO=lz4" > /etc/default/zramswap
+                echo "PERCENT=50" >> /etc/default/zramswap
+                systemctl enable zramswap
+                systemctl start zramswap
+                echo ">>> zram-swap включён (25% RAM, сжатие lz4)"
+            fi
+        else
+            echo ">>> swap уже активен, пропускаем"
+        fi
+    fi
+
+    echo ">>> Настройка защиты от зависания при OOM..."
+    cat <<'SYSCTL' > /etc/sysctl.d/99-kiosk-oom.conf
+# При нехватке памяти — перезагрузка вместо зависания
+vm.panic_on_oom=1
+kernel.panic=10
+
+# Агрессивный swap: начинать использовать zram раньше
+vm.swappiness=80
+
+# Уменьшить кеш файловой системы в пользу приложений
+vm.vfs_cache_pressure=200
+SYSCTL
+    sysctl -p /etc/sysctl.d/99-kiosk-oom.conf
+
+    echo ">>> Настройка политик Chromium..."
+    mkdir -p /etc/chromium/policies/managed
+    cat <<'POLICY' > /etc/chromium/policies/managed/kiosk.json
+{
+    "TranslateEnabled": false,
+    "CommandLineFlagSecurityWarningsEnabled": false,
+    "DefaultNotificationsSetting": 2,
+    "BrowserSignin": 0,
+    "SyncDisabled": true,
+    "MetricsReportingEnabled": false,
+    "EnableMediaRouter": false,
+    "AutofillAddressEnabled": false,
+    "AutofillCreditCardEnabled": false,
+    "PasswordManagerEnabled": false
+}
+POLICY
+
     echo ">>> Настройка директорий кеша..."
-    mkdir -p "$USER_HOME/.cache/cog" "$USER_HOME/.local/share/cog"
-    mkdir -p "$USER_HOME/.cache/com.igalia.Cog" "$USER_HOME/.local/share/com.igalia.Cog"
-    mkdir -p "$USER_HOME/.cache/wpe" "$USER_HOME/.local/share/wpe"
-    chown -R $RPI_USER:$RPI_USER "$USER_HOME/.cache" "$USER_HOME/.local/share"
+    mkdir -p "$USER_HOME/.cache/chromium" "$USER_HOME/.config/chromium"
+    chown -R $RPI_USER:$RPI_USER "$USER_HOME/.cache" "$USER_HOME/.config"
+
+    echo ">>> Создание watchdog для восстановления после краша таба..."
+    cat <<'WATCHDOG' > /usr/local/bin/kiosk-watchdog.sh
+#!/bin/bash
+# Детектирует OOM-краш renderer по отсутствию процесса --type=renderer
+# Когда renderer убит OOM — браузер жив, но renderer-процесса нет
+
+CHECK_INTERVAL=10
+STARTUP_DELAY=30
+DEAD_THRESHOLD=3  # 3 проверки × 10с = 30с без renderer → рестарт
+
+sleep $STARTUP_DELAY
+
+while true; do
+    sleep $CHECK_INTERVAL
+
+    if ! systemctl is-active --quiet kiosk.service; then
+        sleep $STARTUP_DELAY
+        continue
+    fi
+
+    BROWSER=$(pgrep -f '/usr/lib/chromium/chromium' 2>/dev/null | wc -l)
+    RENDERER=$(pgrep -f 'chromium.*--type=renderer' 2>/dev/null | wc -l)
+
+    if [ "${BROWSER}" -gt 0 ] && [ "${RENDERER}" -eq 0 ]; then
+        DEAD_COUNT=$((DEAD_COUNT + 1))
+        logger -t kiosk-watchdog "Нет renderer (${DEAD_COUNT}/${DEAD_THRESHOLD}), RAM: $(free -m | awk '/Mem:/{print $3}')MB used"
+    else
+        DEAD_COUNT=0
+    fi
+
+    if [ "${DEAD_COUNT:-0}" -ge "$DEAD_THRESHOLD" ]; then
+        logger -t kiosk-watchdog "Renderer мёртв — перезапускаю kiosk.service"
+        systemctl restart kiosk.service
+        DEAD_COUNT=0
+        sleep $STARTUP_DELAY
+    fi
+done
+WATCHDOG
+    chmod +x /usr/local/bin/kiosk-watchdog.sh
+
+    cat <<'WSERVICE' > /etc/systemd/system/kiosk-watchdog.service
+[Unit]
+Description=Kiosk Watchdog (auto-restart on renderer crash)
+After=kiosk.service
+BindsTo=kiosk.service
+
+[Service]
+Type=simple
+ExecStart=/usr/local/bin/kiosk-watchdog.sh
+Restart=always
+RestartSec=10
+
+[Install]
+WantedBy=multi-user.target
+WSERVICE
+
+    echo ">>> Создание таймера ночного перезапуска..."
+    cat <<'TIMER' > /etc/systemd/system/kiosk-restart.timer
+[Unit]
+Description=Ночной перезапуск Kiosk для освобождения памяти
+
+[Timer]
+OnCalendar=*-*-* 00:00:00
+Persistent=true
+
+[Install]
+WantedBy=timers.target
+TIMER
+
+    cat <<'TSERVICE' > /etc/systemd/system/kiosk-restart.service
+[Unit]
+Description=Перезапуск Kiosk
+
+[Service]
+Type=oneshot
+ExecStart=/bin/systemctl restart kiosk.service
+TSERVICE
 
     echo ">>> Активация сервиса..."
     systemctl daemon-reload
     systemctl enable kiosk.service
+    systemctl enable kiosk-watchdog.service
+    systemctl enable kiosk-restart.timer
+    systemctl start kiosk-restart.timer
 
     echo ""
     echo "==============================================================="
@@ -248,13 +406,13 @@ clean_cache() {
     systemctl stop kiosk.service
 
     echo ">>> Очистка кеша..."
-    rm -rf "$USER_HOME/.cache/cog" "$USER_HOME/.cache/com.igalia.Cog" "$USER_HOME/.cache/wpe"
+    rm -rf "$USER_HOME/.cache/chromium"
 
     echo "Очистить данные сайтов (LocalStorage, IndexedDB, Service Workers)?"
     echo "ВНИМАНИЕ: Офлайн-данные плеера будут удалены!"
     read -p "Очистить? (y/N): " CLEAN_DATA
     if [[ "$CLEAN_DATA" =~ ^[Yy]$ ]]; then
-        rm -rf "$USER_HOME/.local/share/cog" "$USER_HOME/.local/share/com.igalia.Cog" "$USER_HOME/.local/share/wpe"
+        rm -rf "$USER_HOME/.config/chromium"
         echo ">>> Данные сайтов очищены."
     fi
 
@@ -293,7 +451,7 @@ show_info() {
 while true; do
     clear
     echo "=========================================="
-    echo "    DIETPI KIOSK MANAGER (Cage + Cog)     "
+    echo "  DIETPI KIOSK MANAGER (Cage + Chromium)  "
     echo "           [User: $RPI_USER]              "
     echo "=========================================="
     echo "1. Установить Kiosk Mode (с нуля)"
